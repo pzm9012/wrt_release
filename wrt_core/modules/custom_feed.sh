@@ -118,6 +118,52 @@ sync_repo_root_package_to_feed_dir() {
 }
 
 
+sync_repo_subdir_package_to_feed_dir() {
+    local repo_url="$1"
+    local repo_branch="$2"
+    local target_dir="$3"
+    local repo_label="$4"
+    local repo_dir_name="$5"
+    local package_subdir="$6"
+    local package_dir_name="$7"
+    local tmp_dir
+    local clone_args=(clone --depth 1 --filter=blob:none)
+
+    tmp_dir=$(mktemp -d)
+
+    if [ -n "$repo_branch" ]; then
+        clone_args+=(-b "$repo_branch")
+    fi
+
+    clone_args+=("$repo_url" "$tmp_dir")
+
+    echo "正在从 $repo_label 同步子目录软件包仓库..."
+    if ! git_retry "${clone_args[@]}"; then
+        echo "错误：从 $repo_url 克隆 $repo_label 失败" >&2
+        rm -rf "$tmp_dir"
+        return 1
+    fi
+
+    # 整仓同步：包 Makefile 位于子目录，并通过 ../ 引用仓库根源码（如 go.mod、cmd、internal）。
+    if [ ! -f "$tmp_dir/$package_subdir/Makefile" ]; then
+        echo "错误：$repo_label 仓库缺少 $package_subdir/Makefile" >&2
+        rm -rf "$tmp_dir"
+        return 1
+    fi
+
+    mv "$tmp_dir/$package_subdir" "$tmp_dir/$package_dir_name"
+
+    rm -rf "$tmp_dir/.git"
+    rm -rf "$target_dir/$repo_dir_name"
+
+    if ! mv "$tmp_dir" "$target_dir/$repo_dir_name"; then
+        echo "错误：无法将 $repo_label 移动到 $target_dir/$repo_dir_name" >&2
+        rm -rf "$tmp_dir"
+        return 1
+    fi
+}
+
+
 fix_emmc_health_luci_js_deps() {
     local package_dir="$1"
     local makefile_path="$package_dir/Makefile"
@@ -171,7 +217,7 @@ install_custom_feed() {
         luci-app-quickstart luci-app-store luci-app-homeproxy luci-app-mosdns
         luci-app-passwall nikki luci-app-nikki mihomo-meta
         open-app-filter luci-app-oaf lucky luci-app-lucky luci-app-easytier
-        luci-app-emmc-health
+        luci-app-emmc-health UA3F
     )
     local custom_feed_sources=()
     local missing_feed_dirs=()
@@ -219,6 +265,11 @@ install_custom_feed() {
     done
 
     if ! sync_repo_root_package_to_feed_dir "https://github.com/adminchenyu/eMMC-Health.git" "main" "$custom_feed_dir" "adminchenyu/eMMC-Health" "luci-app-emmc-health"; then
+        rm -rf "$custom_feed_dir"
+        return 1
+    fi
+
+    if ! sync_repo_subdir_package_to_feed_dir "https://github.com/SunBK201/UA3F.git" "master" "$custom_feed_dir" "SunBK201/UA3F" "UA3F" "openwrt" "ua3f"; then
         rm -rf "$custom_feed_dir"
         return 1
     fi
